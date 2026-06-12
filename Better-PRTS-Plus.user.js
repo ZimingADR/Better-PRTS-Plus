@@ -31,6 +31,7 @@
     // [V12.0/V3.1.0 数据重构] 单一集合存储提升性能，包含向下兼容
     const ACCOUNTS_DATA_KEY = 'prts_plus_accounts_data';
     const DISPLAY_MODE_KEY = 'prts_plus_display_mode'; // 可选值: 'GRAY' | 'HIDE'
+    const FILTER_MODE_KEY = 'prts_plus_filter_mode'; // 可选值: 'NONE' | 'PERFECT' | 'SUPPORT'
 
     // [设置配置] 功能开关默认状态
     const CONFIG = {
@@ -43,9 +44,10 @@
     let activeAccountId = 1;
     let accountsData = { 1:[], 2: [], 3:[] }; // 多账号数据缓存池
 
-    let currentFilterMode = 'NONE';
+    let currentFilterMode = GM_getValue(FILTER_MODE_KEY, 'NONE');
     let displayMode = GM_getValue(DISPLAY_MODE_KEY, 'GRAY');
     let ownedOpsSet = new Set();
+    const operationCache = new WeakMap();
 
     let isProcessingFilter = false;
     let rafId = null;
@@ -165,6 +167,82 @@
             top: `${Number(clampedTop.toFixed(1))}%`,
             isRight: parsed?.isRight !== false
         };
+    }
+
+    function normalizeFilterMode(mode) {
+        return ['NONE', 'PERFECT', 'SUPPORT'].includes(mode) ? mode : 'NONE';
+    }
+
+    function getCardSignature(card) {
+        return card ? card.innerText : '';
+    }
+
+    function buildFallbackOperation(card) {
+        const tags = Array.from(card.querySelectorAll('.bp4-tag, .prts-op-text'));
+        const requiredOps = [];
+        const requiredGroups = [];
+
+        tags.forEach(tag => {
+            if (tag.querySelector('h4')) return;
+            if (tag.style.display === 'none') return;
+
+            const text = tag.innerText.trim();
+            if (!text || ['普通', '突袭', 'Beta'].includes(text) || text.includes('活动关卡') ||
+                text.includes('|') || text.includes('更新') || text.includes('作者')) return;
+
+            let name = text.split(/\s+/)[0];
+            const isGroup = /^\[.*\]$/.test(name) || tag.classList.contains('prts-op-text');
+            name = name.replace(/^\[|\]$/g, '');
+
+            if (!name) return;
+
+            if (isGroup) {
+                // 尝试获取悬浮窗组件内部的文本内容
+                const targetNode = tag.closest('.bp4-popover2-target');
+                let groupCandidates = [];
+                if (targetNode) {
+                    const popoverText = extractPopoverContentFromFiber(targetNode);
+                    // 格式化文本 "-> 塞雷娅, 临光" -> ["塞雷娅", "临光"]
+                    const cleanStr = popoverText.replace(/^->\s*/, '');
+                    const names = cleanStr.split(/[,，]\s*/).map(s => s.split(/\s+/)[0]).filter(Boolean);
+                    groupCandidates = names.map(n => ({ name: n }));
+                }
+                requiredGroups.push({ name: name, opers: groupCandidates });
+            } else {
+                requiredOps.push({ name });
+            }
+        });
+
+        return { parsedContent: { opers: requiredOps, groups: requiredGroups }, _isFallback: true };
+    }
+
+    function getOperationForCard(card, cardInner) {
+        const signature = getCardSignature(card);
+        const cached = operationCache.get(card);
+        if (cached && cached.signature === signature) {
+            return cached.operation;
+        }
+
+        const operation = extractOperationFromFiber(cardInner) || extractOperationFromFiber(card) || buildFallbackOperation(card);
+        operationCache.set(card, { signature, operation });
+        return operation;
+    }
+
+    function updateStatusLabel(label, className, iconText, text) {
+        const state = `${className}|${iconText}|${text}`;
+        if (label.dataset.prtsStatusState === state) return;
+
+        label.className = className;
+        label.replaceChildren();
+
+        const icon = document.createElement('span');
+        icon.className = 'bp4-icon';
+        icon.style.marginRight = '6px';
+        icon.textContent = iconText;
+
+        label.appendChild(icon);
+        label.appendChild(document.createTextNode(text));
+        label.dataset.prtsStatusState = state;
     }
 
     // [样式] CSS 样式定义
@@ -600,6 +678,7 @@
      * 加载干员数据：具备高级的向下兼容与数据迁移能力
      */
     function loadOwnedOps() {
+        currentFilterMode = normalizeFilterMode(currentFilterMode);
         // 尝试加载主存储集合
         const unifiedStore = GM_getValue(ACCOUNTS_DATA_KEY);
         let migrated = false;
@@ -755,6 +834,8 @@
             return;
         }
         currentFilterMode = (currentFilterMode === mode) ? 'NONE' : mode;
+        currentFilterMode = normalizeFilterMode(currentFilterMode);
+        GM_setValue(FILTER_MODE_KEY, currentFilterMode);
         updateFilterButtonStyles();
         requestFilterUpdate();
     }
@@ -1055,6 +1136,7 @@
 
                     tag.dataset.opExtracted = "true";
                 });
+                labelDiv.dataset.opsProcessed = "true";
             }
         }
     }
@@ -1139,47 +1221,7 @@
                 optimizeCardVisuals(card, cardInner);
                 cleanBilibiliLinks(cardInner);
 
-                // 1. 通过 Fiber 树提取数据，适应组件层级变化
-                let operation = extractOperationFromFiber(cardInner) || extractOperationFromFiber(card);
-
-                // 2. 降级抓取模式：解析 DOM 结构获取干员及干员组
-                if (!operation) {
-                    const tags = Array.from(card.querySelectorAll('.bp4-tag, .prts-op-text'));
-                    const requiredOps = [];
-                    const requiredGroups = [];
-
-                    tags.forEach(tag => {
-                        if (tag.querySelector('h4')) return;
-                        if (tag.style.display === 'none') return;
-
-                        const text = tag.innerText.trim();
-                        if (!text || ['普通', '突袭', 'Beta'].includes(text) || text.includes('活动关卡') ||
-                            text.includes('|') || text.includes('更新') || text.includes('作者')) return;
-
-                        let name = text.split(/\s+/)[0];
-                        const isGroup = /^\[.*\]$/.test(name) || tag.classList.contains('prts-op-text');
-                        name = name.replace(/^\[|\]$/g, '');
-
-                        if (name) {
-                            if (isGroup) {
-                                // 尝试获取悬浮窗组件内部的文本内容
-                                const targetNode = tag.closest('.bp4-popover2-target');
-                                let groupCandidates = [];
-                                if (targetNode) {
-                                    const popoverText = extractPopoverContentFromFiber(targetNode);
-                                    // 格式化文本 "-> 塞雷娅, 临光" -> ["塞雷娅", "临光"]
-                                    const cleanStr = popoverText.replace(/^->\s*/, '');
-                                    const names = cleanStr.split(/[,，]\s*/).map(s => s.split(/\s+/)[0]).filter(Boolean);
-                                    groupCandidates = names.map(n => ({ name: n }));
-                                }
-                                requiredGroups.push({ name: name, opers: groupCandidates });
-                            } else {
-                                requiredOps.push({ name });
-                            }
-                        }
-                    });
-                    operation = { parsedContent: { opers: requiredOps, groups: requiredGroups }, _isFallback: true };
-                }
+                const operation = getOperationForCard(card, cardInner);
 
                 const { isAvailable, missingCount, missingOps } = checkOperationAvailability(operation, ownedOpsSet, currentFilterMode);
 
@@ -1205,28 +1247,27 @@
                     return;
                 }
 
-                let newHtml = '';
+                let labelText = '';
+                let iconText = '';
                 let newClass = 'prts-status-label';
 
                 if (currentFilterMode === 'SUPPORT' && missingCount === 1) {
                     newClass += ' prts-label-support';
                     const name = missingOps[0];
-                    newHtml = `<span class="bp4-icon" style="margin-right:6px">👤</span>需助战: ${name}`;
+                    iconText = '👤';
+                    labelText = `需助战: ${name}`;
                 } else {
                     newClass += ' prts-label-missing';
                     const listStr = missingOps.slice(0, 3).join(', ') + (missingCount > 3 ? '...' : '');
-                    newHtml = `<span class="bp4-icon" style="margin-right:6px">✘</span>缺 ${missingCount} 人${missingCount > 0 ? ': ' + listStr : ''}`;
+                    iconText = '✘';
+                    labelText = `缺 ${missingCount} 人${missingCount > 0 ? ': ' + listStr : ''}`;
                 }
 
                 if (existingLabel) {
-                    if (existingLabel.innerHTML !== newHtml || existingLabel.className !== newClass) {
-                        existingLabel.className = newClass;
-                        existingLabel.innerHTML = newHtml;
-                    }
+                    updateStatusLabel(existingLabel, newClass, iconText, labelText);
                 } else {
                     const labelDiv = document.createElement('div');
-                    labelDiv.className = newClass;
-                    labelDiv.innerHTML = newHtml;
+                    updateStatusLabel(labelDiv, newClass, iconText, labelText);
 
                     const descContainer = cardInner.querySelector('.prts-desc-wrapper') ||
                                          cardInner.querySelector('.grow.text-gray-700') ||

@@ -55,6 +55,24 @@ if ($userScript -notmatch "function parseImportedOperatorNames") {
 if ($userScript -match "\\u4e00-\\u9fa5") {
     throw "Import parsing still contains the old narrow CJK whitelist"
 }
+if ($userScript -notmatch "const operationCache = new WeakMap\(\)") {
+    throw "Missing operation cache"
+}
+if ($userScript -notmatch "function getOperationForCard") {
+    throw "Missing cached operation resolver"
+}
+if ($userScript -notmatch "labelDiv\.dataset\.opsProcessed = `"true`"") {
+    throw "Missing operator visual processing marker"
+}
+if ($userScript -notmatch "function updateStatusLabel") {
+    throw "Missing safe status label renderer"
+}
+if ($userScript -match "existingLabel\.innerHTML|labelDiv\.innerHTML = new") {
+    throw "Status labels should not be rendered with innerHTML"
+}
+if ($userScript -notmatch "GM_setValue\(FILTER_MODE_KEY, currentFilterMode\)") {
+    throw "Filter mode persistence is missing"
+}
 
 $specialCases = @(
     @{ id = "char_1019_siege2"; contains = [char]0x00B7 },
