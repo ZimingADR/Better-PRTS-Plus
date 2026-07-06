@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better-PRTS-Plus
 // @namespace    https://github.com/ntgmc/Better-PRTS-Plus
-// @version      2.16.0
+// @version      2.16.1
 // @description  一款集成多账号无缝切换、智能作业筛选(支持干员组)、深度暗黑模式适配与干员头像可视化的 PRTS 全方位增强脚本。
 // @author       一只摆烂的42
 // @match        https://zoot.plus/*
@@ -43,6 +43,7 @@
     const ACCOUNT_BACKUP_MAX_BYTES = 2 * 1024 * 1024;
     const OPERATOR_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
     const ACCOUNT_LABEL_MAX_LENGTH = 20;
+    const ACCOUNT_IDS = [1, 2, 3];
     const SKLAND_BASE_URL = 'https://zonai.skland.com';
     const SKLAND_HOME_URL = 'https://www.skland.com/index';
     const SKLAND_REQUEST_TIMEOUT_MS = 25000;
@@ -95,8 +96,6 @@
     if (typeof RAW_OPS !== 'undefined' && RAW_OPS.length > 0) {
         RAW_OPS.forEach(op => { OP_ID_MAP[op.name] = op.id; });
     }
-
-    const ACCOUNT_IDS = [1, 2, 3];
 
     function createEmptyAccountsData() {
         return { 1: [], 2: [], 3: [] };
