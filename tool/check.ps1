@@ -67,6 +67,62 @@ if ($userScript -match "op\??\.own !== false") {
 if ($userScript -match "\\u4e00-\\u9fa5") {
     throw "Import parsing still contains the old narrow CJK whitelist"
 }
+Write-Host "Checking import experience flow..."
+foreach ($requiredFunction in @(
+    "showPrtsToast",
+    "openOperatorImportDialog",
+    "readOperatorImportFile",
+    "applyImportedOperatorNames",
+    "getOperatorImportDiff",
+    "setOperatorImportStatus"
+)) {
+    if ($userScript -notmatch "function $requiredFunction") {
+        throw "Missing import experience helper: $requiredFunction"
+    }
+}
+$handleImportFunction = [regex]::Match($userScript, "function handleImport\(\)\s*\{[\s\S]*?\r?\n\s*\}")
+if (-not $handleImportFunction.Success -or $handleImportFunction.Value -notmatch "openOperatorImportDialog\(\)") {
+    throw "Operator import button should open the inline import dialog"
+}
+if ($handleImportFunction.Value -match "\balert\s*\(") {
+    throw "Operator import entrypoint should not use blocking alert feedback"
+}
+$operatorImportFlow = [regex]::Match($userScript, "function getImportErrorMessage\(\)[\s\S]*?\r?\n\s*function handleOpenSklandImport\(\)").Value
+if ($operatorImportFlow -match "\balert\s*\(") {
+    throw "Operator import flow should use toast/status feedback instead of alerts"
+}
+$diffSummaryFunction = [regex]::Match($userScript, "function formatOperatorImportDiff\([^)]*\)[\s\S]*?\r?\n\s*function setOperatorImportStatus")
+$summaryTokens = @(
+    [string]::Concat([char]0x65B0, [char]0x589E),
+    [string]::Concat([char]0x79FB, [char]0x9664),
+    [string]::Concat([char]0x5F53, [char]0x524D),
+    "diff\.added",
+    "diff\.removed",
+    "diff\.total"
+)
+if (-not $diffSummaryFunction.Success) {
+    throw "Operator import success summary should include added, removed, and current totals"
+}
+foreach ($summaryToken in $summaryTokens) {
+    if ($diffSummaryFunction.Value -notmatch $summaryToken) {
+        throw "Operator import success summary should include added, removed, and current totals"
+    }
+}
+if ($userScript -notmatch "container\.setAttribute\('aria-live', 'polite'\)" -or
+    $userScript -notmatch "status\.setAttribute\('aria-live', 'polite'\)" -or
+    $userScript -notmatch "statusEl\.setAttribute\('aria-live'") {
+    throw "Import toast and status feedback should expose aria-live announcements"
+}
+foreach ($ownedSelector in @(
+    "#prts-toast-container",
+    "#prts-import-dialog",
+    "#prts-import-dialog-backdrop",
+    ".prts-import-status"
+)) {
+    if ($userScript -notmatch [regex]::Escape($ownedSelector)) {
+        throw "Script-owned mutation whitelist missing import selector: $ownedSelector"
+    }
+}
 Write-Host "Checking Skland import flow..."
 if ($userScript -notmatch "@match\s+https://www\.skland\.com/\*") {
     throw "Missing Skland userscript match"
@@ -107,6 +163,52 @@ if ($userScript -match "skland:\s*SKLAND_FAVICON_32_DATA_URI") {
 }
 if ($userScript -match "GM_setValue\([^\r\n]*(?:cred|credential|token)") {
     throw "Skland credentials or tokens must not be persisted"
+}
+Write-Host "Checking account metadata and backup flow..."
+foreach ($requiredFunction in @(
+    "createDefaultAccountMeta",
+    "normalizeAccountMeta",
+    "getAccountLabel",
+    "renameAccount",
+    "updateAccountLabelFromSkland",
+    "buildAccountsBackup",
+    "parseAccountsBackup",
+    "applyAccountsBackup",
+    "handleExportAccountsBackup",
+    "handleImportAccountsBackup"
+)) {
+    if ($userScript -notmatch "function $requiredFunction") {
+        throw "Missing account management helper: $requiredFunction"
+    }
+}
+if ($userScript -notmatch "GM_setValue\(ACCOUNTS_DATA_KEY,[\s\S]*accountMeta") {
+    throw "Account metadata should be persisted with account data"
+}
+if ($userScript -notmatch "function loadOwnedOps\(\)[\s\S]*parsed\.accountMeta[\s\S]*normalizeAccountMeta") {
+    throw "loadOwnedOps should normalize missing or existing account metadata"
+}
+if ($userScript -notmatch "function importSklandOperatorsToAccount\([^)]*\)[\s\S]*updateAccountLabelFromSkland\(targetAccountId, binding\.nickname\)") {
+    throw "Skland import should update account labels from nickname"
+}
+if ($userScript -notmatch "function updateAccountLabelFromSkland\([\s\S]*labelSource === 'manual'[\s\S]*return") {
+    throw "Skland import should preserve manually renamed accounts"
+}
+if ($userScript -notmatch "const ACCOUNT_BACKUP_TYPE = 'Better-PRTS-Plus\.accounts-backup'" -or
+    $userScript -notmatch "const ACCOUNT_BACKUP_VERSION = 1") {
+    throw "Missing account backup schema constants"
+}
+if ($userScript -notmatch "function buildAccountsBackup\(\)[\s\S]*preferences:[\s\S]*getBackupPreferences\(\)") {
+    throw "Account backup should export UI preferences"
+}
+if ($userScript -notmatch "function getBackupPreferences\(\)[\s\S]*filterMode[\s\S]*displayMode[\s\S]*floatingPosition") {
+    throw "Account backup preferences should include filter/display/floating settings"
+}
+if ($userScript -notmatch "function parseAccountsBackup\([\s\S]*value\.type !== ACCOUNT_BACKUP_TYPE[\s\S]*value\.version !== ACCOUNT_BACKUP_VERSION") {
+    throw "Account backup import should validate type and version"
+}
+$backupFunction = [regex]::Match($userScript, "function buildAccountsBackup\(\)[\s\S]*?\r?\n\s*function ").Value
+if ($backupFunction -match "SKLAND_LAST_IMPORT_KEY|credential|token|localStorage") {
+    throw "Account backup export should not include Skland history, credentials, tokens, or localStorage"
 }
 $importSamplePath = Join-Path $PSScriptRoot "test.txt"
 if (Test-Path -LiteralPath $importSamplePath) {

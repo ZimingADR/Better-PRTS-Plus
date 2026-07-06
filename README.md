@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-2.15.0-blue.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-2.16.0-blue.svg?style=flat-square)
 ![License](https://img.shields.io/badge/License-GPL--3.0-red.svg?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Tampermonkey-green.svg?style=flat-square)
 [![GreasyFork](https://img.shields.io/badge/Release-GreasyFork-orange.svg?style=flat-square)](https://greasyfork.org/zh-CN/scripts/558329-better-prts-plus)
@@ -59,8 +59,8 @@
 ### 第一步：导入您的干员数据
 1.  点击页面右侧的 **⚙️ 悬浮球**。
 2.  点击 **“📂 导入干员数据”**。
-3.  上传包含您已拥有干员名称的 `.json` 或 `.txt` 文件。
-    > **提示**：脚本兼容 MAA 导出的 JSON 格式。您也可以新建一个 TXT，每行写一个干员名字进行批量导入。
+3.  在导入窗口中选择 `.json` / `.txt` 文件，或直接粘贴 JSON/TXT 文本后点击 **“导入粘贴内容”**。
+    > **提示**：脚本兼容 MAA 导出的 JSON 格式。TXT 支持每行一个干员名字；导入成功后会显示“新增 / 移除 / 当前总数”摘要，方便确认结果。
 
 也可以使用 **森空岛导入**：
 1.  在 PRTS Plus 的筛选栏或悬浮球面板点击 **“森空岛导入”**，打开森空岛网页。
@@ -74,6 +74,8 @@
 
 ### 第三步：自定义偏好
 *   通过悬浮球的设置面板，您可以实时开关“卡片美化”、“侧边栏净化”、“链接优化”等功能，配置将自动云端同步（随油猴账号）。
+*   在悬浮球面板的账号区域，可点击 **“改名”** 为 3 个账号档位设置备注，例如“大号”“小号”“仅低配号”。如果账号尚未手动改名，森空岛导入成功后会自动使用森空岛昵称作为账号名。
+*   点击 **“导出全部配置”** 可以备份 3 个账号的干员数据、账号备注和界面偏好；在新浏览器或重装油猴后，点击 **“导入全部配置”** 并确认覆盖即可恢复。备份文件不会包含森空岛凭据、token 或登录态。
 
 ---
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better-PRTS-Plus
 // @namespace    https://github.com/ntgmc/Better-PRTS-Plus
-// @version      2.15.0
+// @version      2.16.0
 // @description  一款集成多账号无缝切换、智能作业筛选(支持干员组)、深度暗黑模式适配与干员头像可视化的 PRTS 全方位增强脚本。
 // @author       一只摆烂的42
 // @match        https://zoot.plus/*
@@ -38,6 +38,11 @@
     const DISPLAY_MODE_KEY = 'prts_plus_display_mode'; // 可选值: 'GRAY' | 'HIDE'
     const FILTER_MODE_KEY = 'prts_plus_filter_mode'; // 可选值: 'NONE' | 'PERFECT' | 'SUPPORT'
     const SKLAND_LAST_IMPORT_KEY = 'prts_plus_skland_last_import';
+    const ACCOUNT_BACKUP_TYPE = 'Better-PRTS-Plus.accounts-backup';
+    const ACCOUNT_BACKUP_VERSION = 1;
+    const ACCOUNT_BACKUP_MAX_BYTES = 2 * 1024 * 1024;
+    const OPERATOR_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+    const ACCOUNT_LABEL_MAX_LENGTH = 20;
     const SKLAND_BASE_URL = 'https://zonai.skland.com';
     const SKLAND_HOME_URL = 'https://www.skland.com/index';
     const SKLAND_REQUEST_TIMEOUT_MS = 25000;
@@ -67,9 +72,10 @@
     // 全局状态变量
     let activeAccountId = 1;
     let accountsData = { 1:[], 2: [], 3:[] }; // 多账号数据缓存池
+    let accountMeta = createDefaultAccountMeta();
 
     let currentFilterMode = GM_getValue(FILTER_MODE_KEY, 'NONE');
-    let displayMode = GM_getValue(DISPLAY_MODE_KEY, 'GRAY');
+    let displayMode = normalizeDisplayMode(GM_getValue(DISPLAY_MODE_KEY, 'GRAY'));
     let ownedOpsSet = new Set();
     const operationCache = new WeakMap();
 
@@ -77,6 +83,7 @@
     let rafId = null;
     let filterDebounceTimer = null;
     let lastRouteKey = `${window.location.pathname}${window.location.search}`;
+    let operatorImportDialogCleanup = null;
 
     // =========================================================================
     //                            MODULE 2: 数据与样式
@@ -93,6 +100,18 @@
 
     function createEmptyAccountsData() {
         return { 1: [], 2: [], 3: [] };
+    }
+
+    function getDefaultAccountLabel(id) {
+        return `账号 ${normalizeAccountId(id)}`;
+    }
+
+    function createDefaultAccountMeta() {
+        const meta = {};
+        ACCOUNT_IDS.forEach(id => {
+            meta[id] = { label: getDefaultAccountLabel(id), labelSource: 'default' };
+        });
+        return meta;
     }
 
     function normalizeAccountId(id) {
@@ -129,6 +148,48 @@
             normalized[id] = sanitizeOperatorNames(value[id]);
         });
         return normalized;
+    }
+
+    function normalizeAccountLabel(label, id) {
+        const cleaned = typeof label === 'string'
+            ? label.replace(/[\x00-\x1F\x7F]/g, '').trim()
+            : '';
+        return cleaned ? cleaned.slice(0, ACCOUNT_LABEL_MAX_LENGTH) : getDefaultAccountLabel(id);
+    }
+
+    function normalizeAccountLabelSource(source) {
+        return ['default', 'manual', 'skland'].includes(source) ? source : 'default';
+    }
+
+    function normalizeAccountMeta(value) {
+        const normalized = createDefaultAccountMeta();
+        if (!value || typeof value !== 'object') return normalized;
+
+        ACCOUNT_IDS.forEach(id => {
+            const raw = value[id];
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+
+            const rawLabel = typeof raw.label === 'string'
+                ? raw.label.replace(/[\x00-\x1F\x7F]/g, '').trim()
+                : '';
+            const label = normalizeAccountLabel(rawLabel, id);
+            let labelSource = rawLabel ? normalizeAccountLabelSource(raw.labelSource) : 'default';
+            if (label === getDefaultAccountLabel(id) && labelSource !== 'skland') {
+                labelSource = 'default';
+            }
+            normalized[id] = { label, labelSource };
+        });
+        return normalized;
+    }
+
+    function getAccountLabel(id) {
+        const accountId = normalizeAccountId(id);
+        const meta = accountMeta && accountMeta[accountId];
+        return meta?.label || getDefaultAccountLabel(accountId);
+    }
+
+    function getAccountOperatorCount(id) {
+        return (accountsData[normalizeAccountId(id)] || []).length;
     }
 
     function safeJsonParse(rawValue, fallback) {
@@ -275,11 +336,13 @@
 
         accountsData[targetAccountId] = names;
         activeAccountId = targetAccountId;
+        updateAccountLabelFromSkland(targetAccountId, binding.nickname);
         saveAccountsData();
         ownedOpsSet = new Set(names);
 
         const summary = {
             accountId: targetAccountId,
+            accountLabel: getAccountLabel(targetAccountId),
             operatorCount: names.length,
             nickname: binding.nickname,
             uid: binding.uid,
@@ -645,6 +708,10 @@
         return ['NONE', 'PERFECT', 'SUPPORT'].includes(mode) ? mode : 'NONE';
     }
 
+    function normalizeDisplayMode(mode) {
+        return ['GRAY', 'HIDE'].includes(mode) ? mode : 'GRAY';
+    }
+
     function findSearchInputGroup() {
         const blueprintGroup = document.querySelector(BP_SELECTORS.inputGroup);
         if (blueprintGroup) return blueprintGroup;
@@ -824,12 +891,22 @@
 
 
     /* [V12.0/3.1.0] 多账号悬浮面板小按钮专属样式 */
-    .prts-acc-btn { min-width: 28px !important; padding: 2px 6px !important; border: 1px solid #cbd5e1 !important; margin: 0 !important; border-radius: 4px !important; transition: all 0.2s; }
+    .prts-account-list { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 6px; }
+    .prts-account-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+    .prts-acc-btn { flex: 1 1 auto !important; min-width: 0 !important; justify-content: flex-start !important; padding: 5px 8px !important; border: 1px solid #cbd5e1 !important; margin: 0 !important; border-radius: 4px !important; transition: all 0.2s; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+    .prts-account-rename { flex: 0 0 auto; border: 1px solid #cbd5e1; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; font-size: 12px; padding: 4px 6px; line-height: 1.2; }
+    .prts-account-rename:hover { color: #2563eb; border-color: #93c5fd; background-color: rgba(147, 197, 253, 0.16); }
+    .prts-panel-actions { display: flex; gap: 8px; margin-top: 8px; width: 100%; }
+    .prts-panel-actions .prts-btn { flex: 1 1 0 !important; margin: 0 !important; padding: 6px 8px !important; font-size: 13px !important; }
     .prts-acc-btn.active { background-color: #3b82f6 !important; color: #fff !important; border-color: #3b82f6 !important; }
     body.dark .prts-acc-btn { border-color: #415262 !important; color: #c4d0dc !important; }
     body.dark .prts-acc-btn.active { background-color: #2563eb !important; border-color: #2563eb !important; color: #fff !important; }
+    body.dark .prts-account-rename { border-color: #415262; color: #c4d0dc; }
+    body.dark .prts-account-rename:hover { color: #60a5fa; border-color: #60a5fa; background-color: rgba(96, 165, 250, 0.16); }
     body.high-contrast-theme .prts-acc-btn { border-color: #38383b !important; color: #d1d5db !important; }
     body.high-contrast-theme .prts-acc-btn.active { background-color: #2563eb !important; border-color: #2563eb !important; color: #fff !important; }
+    body.high-contrast-theme .prts-account-rename { border-color: #38383b; color: #d1d5db; }
+    body.high-contrast-theme .prts-account-rename:hover { color: #60a5fa; border-color: #60a5fa; background-color: rgba(96, 165, 250, 0.16); }
 
 
     .prts-divider { width: 1px; height: 16px; background-color: rgba(16, 22, 26, 0.15); margin: 0 8px; display: inline-block; }
@@ -979,7 +1056,90 @@
     .prts-tag-update { background-color: #10b981; } .prts-tag-fix { background-color: #f59e0b; }
     .prts-tag-event { background-color: #3b82f6; } .prts-tag-note { background-color: #64748b; }
 
-    /* 8. 悬浮球 & 控制面板 */
+    /* 8. 导入弹窗与 Toast */
+    #prts-toast-container { position: fixed; right: 16px; bottom: 24px; z-index: 2147483647; width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .prts-toast { pointer-events: auto; padding: 10px 12px; border-radius: 6px; border: 1px solid #e5e7eb; background: #ffffff; color: #1f2937; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18); transform: translateY(0); opacity: 1; transition: opacity 0.18s ease, transform 0.18s ease; }
+    .prts-toast.is-leaving { opacity: 0; transform: translateY(6px); }
+    .prts-toast-title { font-size: 13px; line-height: 1.45; font-weight: 700; }
+    .prts-toast-detail { margin-top: 4px; color: #475569; font-size: 12px; line-height: 1.55; white-space: pre-line; }
+    .prts-toast.success { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+    .prts-toast.success .prts-toast-detail { color: #047857; }
+    .prts-toast.warning { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+    .prts-toast.warning .prts-toast-detail { color: #b45309; }
+    .prts-toast.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+    .prts-toast.error .prts-toast-detail { color: #b91c1c; }
+    body.dark .prts-toast { border-color: #415262; background: #30404d; color: #f5f8fa; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+    body.dark .prts-toast .prts-toast-detail { color: #c4d0dc; }
+    body.dark .prts-toast.success { border-color: #047857; background: rgba(16, 185, 129, 0.16); color: #bbf7d0; }
+    body.dark .prts-toast.success .prts-toast-detail { color: #86efac; }
+    body.dark .prts-toast.warning { border-color: #b45309; background: rgba(245, 158, 11, 0.16); color: #fde68a; }
+    body.dark .prts-toast.warning .prts-toast-detail { color: #fcd34d; }
+    body.dark .prts-toast.error { border-color: #b91c1c; background: rgba(239, 68, 68, 0.16); color: #fecaca; }
+    body.dark .prts-toast.error .prts-toast-detail { color: #fca5a5; }
+    body.high-contrast-theme .prts-toast { border-color: #38383b; background: #18181c; color: #e0e0e0; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+    body.high-contrast-theme .prts-toast .prts-toast-detail { color: #d1d5db; }
+    body.high-contrast-theme .prts-toast.success { border-color: #22c55e; color: #bbf7d0; }
+    body.high-contrast-theme .prts-toast.warning { border-color: #f59e0b; color: #fde68a; }
+    body.high-contrast-theme .prts-toast.error { border-color: #ef4444; color: #fecaca; }
+
+    #prts-import-dialog-backdrop { position: fixed; inset: 0; z-index: 2147483646; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(15, 23, 42, 0.38); box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    #prts-import-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 8px; background: #ffffff; color: #1f2937; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.28); }
+    #prts-import-dialog * { box-sizing: border-box; }
+    .prts-import-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 16px 12px; border-bottom: 1px solid #eef2f7; }
+    .prts-import-title { margin: 0; color: #111827; font-size: 16px; line-height: 1.45; font-weight: 700; }
+    .prts-import-subtitle { margin: 4px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+    .prts-import-close { flex: 0 0 auto; width: 44px; min-height: 44px; border: none; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; font-size: 24px; line-height: 1; }
+    .prts-import-close:hover, .prts-import-close:focus-visible { background: #f1f5f9; color: #0f172a; outline: none; }
+    .prts-import-body { padding: 14px 16px 16px; }
+    .prts-import-label { display: block; margin-bottom: 8px; color: #475569; font-size: 13px; font-weight: 700; }
+    .prts-import-textarea { display: block; width: 100%; min-height: 176px; resize: vertical; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff; color: #111827; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, "Microsoft YaHei", monospace; }
+    .prts-import-textarea:focus { border-color: #2563eb; outline: 2px solid rgba(37, 99, 235, 0.2); outline-offset: 1px; }
+    .prts-import-help { margin: 6px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+    .prts-import-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .prts-import-action { min-height: 44px; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; color: #334155; cursor: pointer; padding: 0 14px; font-size: 13px; font-weight: 700; }
+    .prts-import-action:hover, .prts-import-action:focus-visible { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; outline: none; }
+    .prts-import-action.primary { border-color: #2563eb; background: #2563eb; color: #ffffff; }
+    .prts-import-action.primary:hover, .prts-import-action.primary:focus-visible { border-color: #1d4ed8; background: #1d4ed8; color: #ffffff; }
+    .prts-import-action:disabled { opacity: 0.55; cursor: wait; }
+    .prts-import-status { min-height: 42px; margin-top: 12px; padding: 8px 10px; border-radius: 4px; background: #f8fafc; color: #475569; font-size: 12px; line-height: 1.55; white-space: pre-line; }
+    .prts-import-status.loading { background: #eff6ff; color: #1d4ed8; }
+    .prts-import-status.success { background: #ecfdf5; color: #047857; }
+    .prts-import-status.warning { background: #fffbeb; color: #b45309; }
+    .prts-import-status.error { background: #fef2f2; color: #b91c1c; }
+    body.dark #prts-import-dialog { border-color: #415262; background: #30404d; color: #f5f8fa; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.52); }
+    body.dark .prts-import-head { border-color: #415262; }
+    body.dark .prts-import-title { color: #f5f8fa; }
+    body.dark .prts-import-subtitle, body.dark .prts-import-label, body.dark .prts-import-help { color: #c4d0dc; }
+    body.dark .prts-import-close { color: #c4d0dc; }
+    body.dark .prts-import-close:hover, body.dark .prts-import-close:focus-visible { background: rgba(138, 155, 168, 0.15); color: #f5f8fa; }
+    body.dark .prts-import-textarea { border-color: #415262; background: #202b33; color: #f5f8fa; }
+    body.dark .prts-import-action { border-color: #415262; background: #30404d; color: #f5f8fa; }
+    body.dark .prts-import-action:hover, body.dark .prts-import-action:focus-visible { border-color: #60a5fa; background: rgba(96, 165, 250, 0.16); color: #bfdbfe; }
+    body.dark .prts-import-action.primary { border-color: #2563eb; background: #2563eb; color: #ffffff; }
+    body.dark .prts-import-status { background: #202b33; color: #c4d0dc; }
+    body.dark .prts-import-status.loading { background: rgba(96, 165, 250, 0.16); color: #bfdbfe; }
+    body.dark .prts-import-status.success { background: rgba(16, 185, 129, 0.16); color: #86efac; }
+    body.dark .prts-import-status.warning { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+    body.dark .prts-import-status.error { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
+    body.high-contrast-theme #prts-import-dialog { border-color: #38383b; background: #18181c; color: #e0e0e0; }
+    body.high-contrast-theme .prts-import-head { border-color: #38383b; }
+    body.high-contrast-theme .prts-import-title { color: #ffffff; }
+    body.high-contrast-theme .prts-import-subtitle, body.high-contrast-theme .prts-import-label, body.high-contrast-theme .prts-import-help { color: #d1d5db; }
+    body.high-contrast-theme .prts-import-textarea { border-color: #38383b; background: #2d2d30; color: #ffffff; }
+    body.high-contrast-theme .prts-import-action { border-color: #38383b; background: #2d2d30; color: #e0e0e0; }
+    body.high-contrast-theme .prts-import-status { background: #2d2d30; color: #d1d5db; }
+    @media (max-width: 520px) {
+        #prts-import-dialog-backdrop { align-items: flex-end; padding: 12px; }
+        #prts-import-dialog { width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
+        .prts-import-actions { flex-direction: column; }
+        .prts-import-action { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .prts-toast { transition: none; }
+        .prts-toast.is-leaving { transform: none; }
+    }
+
+    /* 9. 悬浮球 & 控制面板 */
     #prts-float-container { position: fixed; z-index: 9999; display: flex; align-items: center; opacity: 0.6; user-select: none; transition: opacity 0.3s, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
     #prts-float-container:hover, #prts-float-container.prts-float-open { opacity: 1; }
     #prts-float-container.is-dragging { opacity: 1; transition: none !important; }
@@ -1021,7 +1181,7 @@
     body.high-contrast-theme input:checked + .prts-slider { background-color: #2563eb; }
 
 
-    /* 9. 侧边栏折叠布局 */
+    /* 10. 侧边栏折叠布局 */
     .prts-sidebar-hidden-layout > div:nth-child(1) {
         width: 100% !important;
         max-width: 100% !important;
@@ -1228,9 +1388,11 @@
     function saveAccountsData() {
         activeAccountId = normalizeAccountId(activeAccountId);
         accountsData = normalizeAccountsData(accountsData);
+        accountMeta = normalizeAccountMeta(accountMeta);
         GM_setValue(ACCOUNTS_DATA_KEY, JSON.stringify({
             activeAccountId,
-            accountsData
+            accountsData,
+            accountMeta
         }));
     }
 
@@ -1239,6 +1401,8 @@
      */
     function loadOwnedOps() {
         currentFilterMode = normalizeFilterMode(currentFilterMode);
+        displayMode = normalizeDisplayMode(displayMode);
+        accountMeta = createDefaultAccountMeta();
         // 尝试加载主存储集合
         const unifiedStore = GM_getValue(ACCOUNTS_DATA_KEY);
         let migrated = false;
@@ -1248,10 +1412,13 @@
                 const parsed = JSON.parse(unifiedStore);
                 activeAccountId = normalizeAccountId(parsed.activeAccountId);
                 accountsData = normalizeAccountsData(parsed.accountsData);
+                accountMeta = normalizeAccountMeta(parsed.accountMeta);
+                if (!parsed.accountMeta) migrated = true;
             } catch (e) {
                 console.error('[Better PRTS] 主数据解析失败', e);
                 activeAccountId = 1;
                 accountsData = createEmptyAccountsData();
+                accountMeta = createDefaultAccountMeta();
             }
         } else {
             // [迁移] 尝试从用户单独定义的 prts_plus_user_ops_N 中恢复
@@ -1312,6 +1479,7 @@
         const bar = document.getElementById('prts-filter-bar');
         if (bar) bar.remove();
         injectFilterControls();
+        refreshAccountControls();
 
         // 3. 立刻触发重新筛选运算
         if (currentFilterMode !== 'NONE') {
@@ -1326,6 +1494,249 @@
         switchAccount(nextId);
     }
 
+    function refreshAccountControls() {
+        document.querySelectorAll('.prts-acc-btn').forEach(btn => {
+            const id = normalizeAccountId(btn.dataset.id);
+            const label = getAccountLabel(id);
+            btn.textContent = `${label} (${getAccountOperatorCount(id)})`;
+            btn.title = `切换到 ${label}`;
+            btn.classList.toggle('active', id === activeAccountId);
+        });
+
+        document.querySelectorAll('[data-prts-config-key]').forEach(input => {
+            const key = input.dataset.prtsConfigKey;
+            if (key && Object.prototype.hasOwnProperty.call(CONFIG, key)) {
+                input.checked = CONFIG[key] === true;
+            }
+        });
+    }
+
+    function refreshAccountStateUi(forceFilterUpdate = false) {
+        const bar = document.getElementById('prts-filter-bar');
+        if (bar) bar.remove();
+        injectFilterControls();
+        refreshAccountControls();
+        applyFloatingPositionToContainer();
+        applySidebarCollapse();
+        if (forceFilterUpdate || currentFilterMode !== 'NONE') requestFilterUpdate();
+    }
+
+    function renameAccount(id) {
+        const accountId = normalizeAccountId(id);
+        const currentLabel = getAccountLabel(accountId);
+        const rawLabel = window.prompt(`重命名账号 ${accountId}`, currentLabel);
+        if (rawLabel === null) return;
+
+        const cleaned = String(rawLabel).replace(/[\x00-\x1F\x7F]/g, '').trim();
+        accountMeta = normalizeAccountMeta(accountMeta);
+        accountMeta[accountId] = {
+            label: normalizeAccountLabel(cleaned, accountId),
+            labelSource: cleaned ? 'manual' : 'default'
+        };
+        saveAccountsData();
+        refreshAccountStateUi();
+    }
+
+    function updateAccountLabelFromSkland(id, nickname) {
+        const accountId = normalizeAccountId(id);
+        const sklandLabel = normalizeAccountLabel(nickname, accountId);
+        if (sklandLabel === getDefaultAccountLabel(accountId)) return;
+
+        accountMeta = normalizeAccountMeta(accountMeta);
+        if (accountMeta[accountId]?.labelSource === 'manual') return;
+
+        accountMeta[accountId] = {
+            label: sklandLabel,
+            labelSource: 'skland'
+        };
+    }
+
+    function getBackupPreferences() {
+        return {
+            filterMode: normalizeFilterMode(currentFilterMode),
+            displayMode: normalizeDisplayMode(displayMode),
+            config: {
+                visuals: CONFIG.visuals === true,
+                cleanLink: CONFIG.cleanLink === true,
+                hideSidebar: CONFIG.hideSidebar === true
+            },
+            floatingPosition: parseFloatingPosition(GM_getValue('prts_float_pos', '{"top":"40%","isRight":true}'))
+        };
+    }
+
+    function buildAccountsBackup() {
+        activeAccountId = normalizeAccountId(activeAccountId);
+        accountsData = normalizeAccountsData(accountsData);
+        accountMeta = normalizeAccountMeta(accountMeta);
+
+        return {
+            type: ACCOUNT_BACKUP_TYPE,
+            version: ACCOUNT_BACKUP_VERSION,
+            exportedAt: new Date().toISOString(),
+            activeAccountId,
+            accountsData,
+            accountMeta,
+            preferences: getBackupPreferences()
+        };
+    }
+
+    function formatBackupTimestamp(date) {
+        const pad = value => String(value).padStart(2, '0');
+        return [
+            date.getFullYear(),
+            pad(date.getMonth() + 1),
+            pad(date.getDate())
+        ].join('') + '-' + [
+            pad(date.getHours()),
+            pad(date.getMinutes()),
+            pad(date.getSeconds())
+        ].join('');
+    }
+
+    function downloadJsonFile(fileName, payload) {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function handleExportAccountsBackup() {
+        try {
+            const backup = buildAccountsBackup();
+            const fileName = `better-prts-plus-backup-${formatBackupTimestamp(new Date())}.json`;
+            downloadJsonFile(fileName, backup);
+            alert(`✅ 已导出全部配置：${fileName}`);
+        } catch (error) {
+            console.error('[Better PRTS] 导出全部配置失败', error);
+            alert('❌ 导出全部配置失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        }
+    }
+
+    function normalizeBackupPreferences(value) {
+        const raw = isPlainRecord(value) ? value : {};
+        const rawConfig = isPlainRecord(raw.config) ? raw.config : {};
+        return {
+            filterMode: normalizeFilterMode(raw.filterMode),
+            displayMode: normalizeDisplayMode(raw.displayMode),
+            config: {
+                visuals: rawConfig.visuals !== false,
+                cleanLink: rawConfig.cleanLink !== false,
+                hideSidebar: rawConfig.hideSidebar === true
+            },
+            floatingPosition: parseFloatingPosition(raw.floatingPosition)
+        };
+    }
+
+    function parseAccountsBackup(value) {
+        if (Array.isArray(value)) {
+            throw new Error('这看起来是单账号干员列表，请使用“导入干员数据”。');
+        }
+        if (!isPlainRecord(value)) {
+            throw new Error('这不是有效的 Better-PRTS-Plus 全部配置备份。');
+        }
+        if (value.type !== ACCOUNT_BACKUP_TYPE || value.version !== ACCOUNT_BACKUP_VERSION) {
+            throw new Error('备份格式不匹配，请选择 Better-PRTS-Plus 导出的全部配置文件。');
+        }
+
+        return {
+            activeAccountId: normalizeAccountId(value.activeAccountId),
+            accountsData: normalizeAccountsData(value.accountsData),
+            accountMeta: normalizeAccountMeta(value.accountMeta),
+            preferences: normalizeBackupPreferences(value.preferences)
+        };
+    }
+
+    function formatAccountsBackupSummary(backup) {
+        const lines = [
+            '将覆盖当前 3 个账号、账号昵称和 UI 偏好。',
+            `导入后当前账号: ${backup.accountMeta[backup.activeAccountId].label}`,
+            ''
+        ];
+
+        ACCOUNT_IDS.forEach(id => {
+            lines.push(`${backup.accountMeta[id].label}: ${backup.accountsData[id].length} 名干员`);
+        });
+        lines.push('');
+        lines.push('确认继续导入？');
+        return lines.join('\n');
+    }
+
+    function applyFloatingPositionToContainer() {
+        const container = document.getElementById('prts-float-container');
+        if (!container) return;
+
+        const savedPos = parseFloatingPosition(GM_getValue('prts_float_pos', '{"top":"40%","isRight":true}'));
+        container.style.top = savedPos.top;
+        if (savedPos.isRight) {
+            container.style.left = 'auto';
+            container.style.right = '0px';
+            container.classList.add('snap-right');
+            container.classList.remove('snap-left');
+        } else {
+            container.style.left = '0px';
+            container.style.right = 'auto';
+            container.classList.add('snap-left');
+            container.classList.remove('snap-right');
+        }
+    }
+
+    function applyAccountsBackup(backup) {
+        activeAccountId = backup.activeAccountId;
+        accountsData = normalizeAccountsData(backup.accountsData);
+        accountMeta = normalizeAccountMeta(backup.accountMeta);
+        currentFilterMode = normalizeFilterMode(backup.preferences.filterMode);
+        displayMode = normalizeDisplayMode(backup.preferences.displayMode);
+        CONFIG.visuals = backup.preferences.config.visuals === true;
+        CONFIG.cleanLink = backup.preferences.config.cleanLink === true;
+        CONFIG.hideSidebar = backup.preferences.config.hideSidebar === true;
+
+        saveAccountsData();
+        GM_setValue(FILTER_MODE_KEY, currentFilterMode);
+        GM_setValue(DISPLAY_MODE_KEY, displayMode);
+        saveConfig();
+        GM_setValue('prts_float_pos', JSON.stringify(backup.preferences.floatingPosition));
+
+        ownedOpsSet = new Set(accountsData[activeAccountId] || []);
+        refreshAccountStateUi(true);
+    }
+
+    function handleImportAccountsBackup() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,application/json';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (file.size > ACCOUNT_BACKUP_MAX_BYTES) {
+                alert('❌ 配置文件过大，请选择 Better-PRTS-Plus 导出的备份文件');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = event => {
+                try {
+                    const parsed = safeJsonParse(event.target.result, null);
+                    const backup = parseAccountsBackup(parsed);
+                    if (!window.confirm(formatAccountsBackupSummary(backup))) return;
+
+                    applyAccountsBackup(backup);
+                    alert('✅ 全部配置导入成功');
+                } catch (error) {
+                    console.error('[Better PRTS] 导入全部配置失败', error);
+                    alert('❌ 导入全部配置失败: ' + (error instanceof Error ? error.message : '未知错误'));
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
     // =========================================================================
     //                            MODULE 5: 业务逻辑 - 筛选、折叠与净化
     // =========================================================================
@@ -1335,49 +1746,312 @@
         return path.startsWith('/create') || path.startsWith('/editor');
     }
 
-    function handleImport() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json, .txt';
-        input.onchange = e => {
-            const file = e.target.files[0];
-            if (!file) return;
+    function getImportErrorMessage(error) {
+        return error instanceof Error ? error.message : '未知错误';
+    }
 
-            if (file.size > 2 * 1024 * 1024) {
-                alert('❌ 文件过大，请上传标准格式的干员数据文件');
-                return;
-            }
+    function getOperatorImportDiff(previousNames, nextNames) {
+        const previousSet = new Set(sanitizeOperatorNames(previousNames));
+        const nextSet = new Set(sanitizeOperatorNames(nextNames));
+        let added = 0;
+        let removed = 0;
 
+        nextSet.forEach(name => {
+            if (!previousSet.has(name)) added += 1;
+        });
+        previousSet.forEach(name => {
+            if (!nextSet.has(name)) removed += 1;
+        });
+
+        return { added, removed, total: nextSet.size };
+    }
+
+    function formatOperatorImportDiff(diff) {
+        return `新增 ${diff.added} / 移除 ${diff.removed} / 当前 ${diff.total}`;
+    }
+
+    function setOperatorImportStatus(statusEl, message, type = '') {
+        if (!statusEl) return;
+
+        const statusType = ['loading', 'success', 'warning', 'error'].includes(type) ? type : '';
+        statusEl.className = `prts-import-status${statusType ? ` ${statusType}` : ''}`;
+        statusEl.textContent = message;
+        statusEl.setAttribute('role', statusType === 'error' ? 'alert' : 'status');
+        statusEl.setAttribute('aria-live', statusType === 'error' ? 'assertive' : 'polite');
+    }
+
+    function ensurePrtsToastContainer() {
+        let container = document.getElementById('prts-toast-container');
+        if (container) return container;
+
+        container = document.createElement('div');
+        container.id = 'prts-toast-container';
+        container.setAttribute('role', 'status');
+        container.setAttribute('aria-live', 'polite');
+        container.setAttribute('aria-atomic', 'false');
+        document.body.appendChild(container);
+        return container;
+    }
+
+    function showPrtsToast(message, type = 'info', detail = '') {
+        const container = ensurePrtsToastContainer();
+        const toastType = ['success', 'warning', 'error'].includes(type) ? type : '';
+        const toast = document.createElement('div');
+        toast.className = `prts-toast${toastType ? ` ${toastType}` : ''}`;
+
+        const title = document.createElement('div');
+        title.className = 'prts-toast-title';
+        title.textContent = message;
+        toast.appendChild(title);
+
+        if (detail) {
+            const detailEl = document.createElement('div');
+            detailEl.className = 'prts-toast-detail';
+            detailEl.textContent = detail;
+            toast.appendChild(detailEl);
+        }
+
+        container.appendChild(toast);
+        window.setTimeout(() => {
+            toast.classList.add('is-leaving');
+            window.setTimeout(() => toast.remove(), 220);
+        }, 4000);
+    }
+
+    function closeOperatorImportDialog() {
+        if (operatorImportDialogCleanup) {
+            operatorImportDialogCleanup();
+            operatorImportDialogCleanup = null;
+            return;
+        }
+
+        document.getElementById('prts-import-dialog')?.remove();
+        document.getElementById('prts-import-dialog-backdrop')?.remove();
+    }
+
+    function applyImportedOperatorNames(names, sourceLabel, statusEl) {
+        const sanitizedNames = sanitizeOperatorNames(names);
+        if (sanitizedNames.length === 0) {
+            const message = '未能识别有效的干员数据，请检查 JSON/TXT 内容。';
+            setOperatorImportStatus(statusEl, message, 'warning');
+            showPrtsToast('未能识别有效的干员数据', 'warning', '请检查文件或粘贴内容后重试。');
+            return false;
+        }
+
+        const accountLabel = getAccountLabel(activeAccountId);
+        const diff = getOperatorImportDiff(accountsData[activeAccountId] || [], sanitizedNames);
+        const diffText = formatOperatorImportDiff(diff);
+        const sourceText = sourceLabel ? `来源：${sourceLabel}` : '来源：导入内容';
+
+        accountsData[activeAccountId] = sanitizedNames;
+        saveAccountsData();
+        ownedOpsSet = new Set(sanitizedNames);
+        refreshAccountStateUi();
+
+        const message = `${accountLabel} 导入成功`;
+        const detail = `${diffText}\n${sourceText}`;
+        setOperatorImportStatus(statusEl, `${message}\n${detail}`, 'success');
+        showPrtsToast(message, 'success', detail);
+        return true;
+    }
+
+    function readOperatorImportFile(file, statusEl) {
+        if (!file) return Promise.resolve(false);
+
+        if (file.size > OPERATOR_IMPORT_MAX_BYTES) {
+            const message = '文件过大，请上传标准格式的干员数据文件。';
+            setOperatorImportStatus(statusEl, message, 'error');
+            showPrtsToast('导入失败', 'error', message);
+            return Promise.resolve(false);
+        }
+
+        setOperatorImportStatus(statusEl, `正在读取 ${file.name || '导入文件'}...`, 'loading');
+        return new Promise(resolve => {
             const reader = new FileReader();
             reader.onload = event => {
                 try {
                     const names = parseImportedOperatorNames(event.target.result, file.name);
-
-                    if (names.length > 0) {
-                        // 保存至当前活跃账号
-                        accountsData[activeAccountId] = names;
-                        saveAccountsData();
-                        ownedOpsSet = new Set(names);
-
-                        // 销毁并重建控制栏以更新数字
-                        const bar = document.getElementById('prts-filter-bar');
-                        if (bar) bar.remove();
-                        injectFilterControls();
-
-                        alert(`✅ 账号 ${activeAccountId} 导入成功！
-共识别 ${names.length} 名持有干员。`);
-                        if (currentFilterMode !== 'NONE') requestFilterUpdate();
-                    } else {
-                        alert('⚠️ 未能识别有效的干员数据，请检查文件格式');
-                    }
-                } catch (err) {
-                    console.error(err);
-                    alert('❌ 导入过程中发生未知错误: ' + err.message);
+                    resolve(applyImportedOperatorNames(names, file.name || '文件导入', statusEl));
+                } catch (error) {
+                    const message = getImportErrorMessage(error);
+                    console.error('[Better PRTS] 导入干员数据失败', error);
+                    setOperatorImportStatus(statusEl, `导入失败：${message}`, 'error');
+                    showPrtsToast('导入失败', 'error', message);
+                    resolve(false);
                 }
             };
+            reader.onerror = () => {
+                const message = reader.error?.message || '无法读取文件，请重试。';
+                setOperatorImportStatus(statusEl, `导入失败：${message}`, 'error');
+                showPrtsToast('导入失败', 'error', message);
+                resolve(false);
+            };
             reader.readAsText(file);
+        });
+    }
+
+    function openOperatorImportDialog() {
+        const existingDialog = document.getElementById('prts-import-dialog');
+        if (existingDialog) {
+            existingDialog.querySelector('.prts-import-textarea')?.focus();
+            return;
+        }
+
+        const backdrop = document.createElement('div');
+        backdrop.id = 'prts-import-dialog-backdrop';
+
+        const dialog = document.createElement('div');
+        dialog.id = 'prts-import-dialog';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', 'prts-import-dialog-title');
+        dialog.setAttribute('aria-describedby', 'prts-import-dialog-help');
+
+        const head = document.createElement('div');
+        head.className = 'prts-import-head';
+
+        const headingWrap = document.createElement('div');
+        const title = document.createElement('h2');
+        title.id = 'prts-import-dialog-title';
+        title.className = 'prts-import-title';
+        title.textContent = `导入到 ${getAccountLabel(activeAccountId)}`;
+        const subtitle = document.createElement('p');
+        subtitle.className = 'prts-import-subtitle';
+        subtitle.textContent = '选择文件或粘贴 JSON/TXT 文本，导入后会替换当前账号的干员列表。';
+        headingWrap.appendChild(title);
+        headingWrap.appendChild(subtitle);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'prts-import-close';
+        closeBtn.setAttribute('aria-label', '关闭导入窗口');
+        closeBtn.textContent = '×';
+        closeBtn.onclick = closeOperatorImportDialog;
+
+        head.appendChild(headingWrap);
+        head.appendChild(closeBtn);
+
+        const body = document.createElement('div');
+        body.className = 'prts-import-body';
+
+        const label = document.createElement('label');
+        label.className = 'prts-import-label';
+        label.htmlFor = 'prts-import-textarea';
+        label.textContent = '粘贴干员数据';
+
+        const textarea = document.createElement('textarea');
+        textarea.id = 'prts-import-textarea';
+        textarea.className = 'prts-import-textarea';
+        textarea.spellcheck = false;
+        textarea.placeholder = '例如：每行一个干员名称，或粘贴 MAA 导出的 JSON 内容';
+
+        const help = document.createElement('p');
+        help.id = 'prts-import-dialog-help';
+        help.className = 'prts-import-help';
+        help.textContent = 'TXT 支持每行一个干员名，空行、# 和 // 开头的行会被忽略。';
+
+        const actions = document.createElement('div');
+        actions.className = 'prts-import-actions';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json,.txt,application/json,text/plain';
+        fileInput.hidden = true;
+
+        const fileBtn = document.createElement('button');
+        fileBtn.type = 'button';
+        fileBtn.className = 'prts-import-action';
+        fileBtn.textContent = '选择文件';
+        fileBtn.onclick = () => fileInput.click();
+
+        const pasteBtn = document.createElement('button');
+        pasteBtn.type = 'button';
+        pasteBtn.className = 'prts-import-action primary';
+        pasteBtn.textContent = '导入粘贴内容';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'prts-import-action';
+        cancelBtn.textContent = '取消';
+        cancelBtn.onclick = closeOperatorImportDialog;
+
+        const status = document.createElement('div');
+        status.className = 'prts-import-status';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        status.textContent = '请选择文件，或在文本框粘贴干员数据后导入。';
+
+        const setBusy = busy => {
+            fileBtn.disabled = busy;
+            pasteBtn.disabled = busy;
         };
-        input.click();
+
+        fileInput.onchange = async event => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setBusy(true);
+            const imported = await readOperatorImportFile(file, status);
+            setBusy(false);
+            fileInput.value = '';
+            if (imported) window.setTimeout(closeOperatorImportDialog, 700);
+        };
+
+        pasteBtn.onclick = () => {
+            const rawText = textarea.value;
+            if (!rawText.trim()) {
+                const message = '请先粘贴 JSON 或逐行干员名称。';
+                setOperatorImportStatus(status, message, 'error');
+                showPrtsToast('无法导入空内容', 'error', message);
+                textarea.focus();
+                return;
+            }
+
+            try {
+                const names = parseImportedOperatorNames(rawText, '');
+                const imported = applyImportedOperatorNames(names, '粘贴内容', status);
+                if (imported) window.setTimeout(closeOperatorImportDialog, 700);
+            } catch (error) {
+                const message = getImportErrorMessage(error);
+                console.error('[Better PRTS] 粘贴导入干员数据失败', error);
+                setOperatorImportStatus(status, `导入失败：${message}`, 'error');
+                showPrtsToast('导入失败', 'error', message);
+            }
+        };
+
+        actions.appendChild(fileBtn);
+        actions.appendChild(pasteBtn);
+        actions.appendChild(cancelBtn);
+
+        body.appendChild(label);
+        body.appendChild(textarea);
+        body.appendChild(help);
+        body.appendChild(actions);
+        body.appendChild(fileInput);
+        body.appendChild(status);
+
+        dialog.appendChild(head);
+        dialog.appendChild(body);
+        backdrop.appendChild(dialog);
+
+        backdrop.addEventListener('click', event => {
+            if (event.target === backdrop) closeOperatorImportDialog();
+        });
+
+        const handleKeydown = event => {
+            if (event.key === 'Escape') closeOperatorImportDialog();
+        };
+        document.addEventListener('keydown', handleKeydown, true);
+        operatorImportDialogCleanup = () => {
+            document.removeEventListener('keydown', handleKeydown, true);
+            backdrop.remove();
+        };
+
+        document.body.appendChild(backdrop);
+        textarea.focus();
+    }
+
+    function handleImport() {
+        openOperatorImportDialog();
     }
 
     function handleOpenSklandImport() {
@@ -1410,7 +2084,7 @@
 
     function toggleFilter(mode) {
         if (ownedOpsSet.size === 0) {
-            alert(`请先为当前 账号 ${activeAccountId} 导入干员数据！`);
+            alert(`请先为当前 ${getAccountLabel(activeAccountId)} 导入干员数据！`);
             return;
         }
         currentFilterMode = (currentFilterMode === mode) ? 'NONE' : mode;
@@ -1517,7 +2191,7 @@
         // 顺序生成元素
 
         // (1) 账号循环切换按钮
-        const btnAccountText = `账号 ${activeAccountId}`;
+        const btnAccountText = getAccountLabel(activeAccountId);
         const btnAccount = renderButton('btn-account', btnAccountText, paths.user, cycleAccount);
         controlBar.appendChild(btnAccount);
 
@@ -1688,7 +2362,7 @@
 
     function isScriptOwnedNode(node) {
         if (!node || node.nodeType !== 1) return false;
-        return Boolean(node.closest?.('#prts-filter-bar, #prts-float-container, .prts-status-label'));
+        return Boolean(node.closest?.('#prts-filter-bar, #prts-float-container, #prts-toast-container, #prts-import-dialog, #prts-import-dialog-backdrop, .prts-import-status, .prts-status-label'));
     }
 
     function hasRelevantDomMutation(mutations) {
@@ -2030,6 +2704,7 @@
         const bar = document.getElementById('prts-filter-bar');
         if (bar) bar.remove();
         injectFilterControls();
+        refreshAccountControls();
         if (currentFilterMode !== 'NONE') requestFilterUpdate();
     }
 
@@ -2088,7 +2763,7 @@
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'prts-skland-account';
-            btn.textContent = `账号 ${id}`;
+            btn.textContent = getAccountLabel(id);
             btn.onclick = () => {
                 targetAccountId = id;
                 renderSklandAccountButtons(accountButtons, targetAccountId);
@@ -2120,7 +2795,7 @@
         importBtn.onclick = async () => {
             importBtn.disabled = true;
             importBtn.textContent = '读取中...';
-            setSklandPanelStatus(status, `正在读取森空岛数据，并导入到账号 ${targetAccountId}。`, '');
+            setSklandPanelStatus(status, `正在读取森空岛数据，并导入到 ${getAccountLabel(targetAccountId)}。`, '');
             try {
                 const summary = await importSklandOperatorsToAccount(targetAccountId);
                 targetAccountId = summary.accountId;
@@ -2147,6 +2822,8 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
     function renderSklandAccountButtons(buttons, activeId) {
         buttons.forEach((btn, index) => {
             const id = ACCOUNT_IDS[index];
+            btn.textContent = getAccountLabel(id);
+            btn.title = `${getAccountLabel(id)} / ${getAccountOperatorCount(id)} 名干员`;
             btn.classList.toggle('active', id === activeId);
         });
     }
@@ -2162,6 +2839,7 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
         if (!isPlainRecord(parsed)) return null;
         return {
             accountId: normalizeAccountId(parsed.accountId),
+            accountLabel: stringValue(parsed.accountLabel),
             operatorCount: Number.isFinite(Number(parsed.operatorCount)) ? Number(parsed.operatorCount) : 0,
             nickname: stringValue(parsed.nickname),
             uid: stringValue(parsed.uid),
@@ -2171,8 +2849,9 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
 
     function formatSklandImportSummary(summary) {
         const timeText = summary.importedAt ? new Date(summary.importedAt).toLocaleString() : '';
+        const accountLabel = summary.accountLabel || getAccountLabel(summary.accountId);
         const lines = [
-            `账号 ${summary.accountId} 已导入 ${summary.operatorCount} 名干员。`,
+            `${accountLabel} 已导入 ${summary.operatorCount} 名干员。`,
             `${summary.nickname || '博士'} / UID ${summary.uid || '未知'}`
         ];
         if (timeText) lines.push(timeText);
@@ -2206,11 +2885,12 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
         const panel = document.createElement('div');
         panel.className = 'prts-settings-panel';
 
-        const createSwitch = (label, checked, onChange) => {
+        const createSwitch = (label, checked, onChange, configKey) => {
             const div = document.createElement('div');
             div.className = 'prts-panel-item';
             div.innerHTML = `<span>${label}</span><label class="prts-switch"><input type="checkbox" ${checked ? 'checked' : ''}><span class="prts-slider"></span></label>`;
             const input = div.querySelector('input');
+            if (configKey) input.dataset.prtsConfigKey = configKey;
             input.onchange = (e) => onChange(e.target.checked);
             return div;
         };
@@ -2222,43 +2902,62 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
 
         panel.appendChild(createSwitch('🖼️ 作业卡片美化', CONFIG.visuals, (val) => {
             CONFIG.visuals = val; saveConfig(); if(val) requestFilterUpdate(); else location.reload();
-        }));
+        }, 'visuals'));
         panel.appendChild(createSwitch('🔗 视频链接优化', CONFIG.cleanLink, (val) => {
             CONFIG.cleanLink = val; saveConfig(); if(val) requestFilterUpdate();
-        }));
+        }, 'cleanLink'));
 
         panel.appendChild(createSwitch('🗂️ 折叠侧边栏', CONFIG.hideSidebar, (val) => {
             CONFIG.hideSidebar = val; saveConfig(); applySidebarCollapse();
-        }));
+        }, 'hideSidebar'));
 
         //[V12.0/V3.1.0 优美的多账号悬浮面板]
         const accRow = document.createElement('div');
         accRow.className = 'prts-panel-item';
         accRow.style.marginTop = '8px';
         accRow.style.marginBottom = '8px';
-        accRow.innerHTML = `<span>👤 切换账号</span>`;
+        accRow.style.flexDirection = 'column';
+        accRow.style.alignItems = 'stretch';
+
+        const accTitle = document.createElement('span');
+        accTitle.textContent = '👤 切换账号';
+        accRow.appendChild(accTitle);
 
         const accBtnGroup = document.createElement('div');
-        accBtnGroup.style.display = 'flex';
-        accBtnGroup.style.gap = '6px';
+        accBtnGroup.className = 'prts-account-list';
 
         for (let i = 1; i <= 3; i++) {
+            const row = document.createElement('div');
+            row.className = 'prts-account-row';
+
             const accBtn = document.createElement('button');
+            accBtn.type = 'button';
             accBtn.className = 'prts-btn prts-acc-btn';
             accBtn.dataset.id = i;
-            accBtn.innerText = String(i);
-            if (i === activeAccountId) accBtn.classList.add('active');
-
             accBtn.onclick = (e) => {
                 e.stopPropagation();
                 switchAccount(i);
             };
-            accBtnGroup.appendChild(accBtn);
+
+            const renameBtn = document.createElement('button');
+            renameBtn.type = 'button';
+            renameBtn.className = 'prts-account-rename';
+            renameBtn.dataset.id = i;
+            renameBtn.textContent = '改名';
+            renameBtn.onclick = (e) => {
+                e.stopPropagation();
+                renameAccount(i);
+            };
+
+            row.appendChild(accBtn);
+            row.appendChild(renameBtn);
+            accBtnGroup.appendChild(row);
         }
         accRow.appendChild(accBtnGroup);
         panel.appendChild(accRow);
 
         const importBtn = document.createElement('button');
+        importBtn.type = 'button';
         importBtn.className = 'prts-btn';
         importBtn.style.width = '100%'; importBtn.style.marginTop = '4px';
         importBtn.innerHTML = '📂 导入干员数据';
@@ -2266,6 +2965,7 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
         panel.appendChild(importBtn);
 
         const sklandBtn = document.createElement('button');
+        sklandBtn.type = 'button';
         sklandBtn.className = 'prts-btn';
         sklandBtn.style.width = '100%'; sklandBtn.style.marginTop = '8px';
         sklandBtn.appendChild(createSklandIconImage());
@@ -2273,9 +2973,29 @@ ${formatSklandImportSummary(lastSummary)}`, 'success');
         sklandBtn.onclick = handleOpenSklandImport;
         panel.appendChild(sklandBtn);
 
+        const backupActions = document.createElement('div');
+        backupActions.className = 'prts-panel-actions';
+
+        const exportBtn = document.createElement('button');
+        exportBtn.type = 'button';
+        exportBtn.className = 'prts-btn';
+        exportBtn.textContent = '导出全部配置';
+        exportBtn.onclick = handleExportAccountsBackup;
+
+        const importBackupBtn = document.createElement('button');
+        importBackupBtn.type = 'button';
+        importBackupBtn.className = 'prts-btn';
+        importBackupBtn.textContent = '导入全部配置';
+        importBackupBtn.onclick = handleImportAccountsBackup;
+
+        backupActions.appendChild(exportBtn);
+        backupActions.appendChild(importBackupBtn);
+        panel.appendChild(backupActions);
+
         container.appendChild(panel);
         container.appendChild(btn);
         document.body.appendChild(container);
+        refreshAccountControls();
 
         let isDragging = false;
         let hasMoved = false;
