@@ -16,7 +16,7 @@
 4. 提交版本变更，例如：
    ```powershell
    git add Better-PRTS-Plus.user.js README.md
-   git commit -m "release: vX.Y.Z"
+   git commit -m "chore(release): vX.Y.Z"
    ```
 5. 创建并推送 tag：
    ```powershell
@@ -32,6 +32,26 @@
 - `tool/check-release.ps1 -Tag vX.Y.Z` 会检查 tag 格式，并要求 tag 版本与 userscript `@version` 完全一致。
 - GitHub Release workflow 会先运行全部检查，再创建 Release；如果 tag 与 `@version` 不一致，发布会在创建 Release 前失败。
 - 如果版本带有预发布后缀，例如 `2.15.0-beta.1`，对应 tag 为 `v2.15.0-beta.1`，GitHub Release 会标记为 prerelease。
+
+## Commit 规范与 Changelog
+
+所有新提交都应使用 Conventional Commits 格式：
+
+```text
+<type>[optional scope][!]: <description>
+```
+
+常用示例：
+
+```text
+feat(skland): 支持从森空岛导入干员数据
+fix(import): parse JSON content before TXT fallback
+chore(release): v2.16.0
+```
+
+允许的 type 包括 `feat`、`fix`、`perf`、`refactor`、`docs`、`test`、`ci`、`build`、`chore`、`style`、`revert`。冒号必须使用英文半角 `:`，并且冒号后需要有一个空格。
+
+GitHub Actions 会检查 PR 或 main push 中新增的提交，不追溯旧历史。Release notes 会由符合规范的提交自动生成；如果某个变更必须出现在 changelog 中，提交信息必须使用上面的格式。
 
 ## 失败处理
 

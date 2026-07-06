@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -29,6 +31,24 @@ jobs:
       - name: Validate release tag
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tool/check-release.ps1 -Tag "${{ github.ref_name }}"
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Verify release notes
+        shell: bash
+        run: |
+          if [ ! -s RELEASE_NOTES.md ] || ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            echo "RELEASE_NOTES.md is empty; refusing to create an empty release."
+            exit 1
+          fi
 
       - name: Read release metadata
         id: meta
@@ -47,7 +67,9 @@ jobs:
             "${{ github.ref_name }}"
             "Better-PRTS-Plus.user.js"
             --title "Better-PRTS-Plus ${{ github.ref_name }}"
-            --generate-notes
+            --notes-file RELEASE_NOTES.md
+            --verify-tag
+            --fail-on-no-commits
           )
 
           if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
