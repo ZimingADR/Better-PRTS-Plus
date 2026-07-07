@@ -44,7 +44,10 @@
     .prts-bili-link .bp4-icon { margin-right: 4px; font-size: 11px; }
 
     /* 3. 筛选栏与按钮 */
-    #prts-filter-bar { display: flex; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 8px; margin-bottom: 12px; padding-left: 2px; }
+    #prts-filter-bar { display: flex; align-items: flex-start; flex-direction: column; width: 100%; margin-top: 8px; margin-bottom: 12px; padding-left: 2px; }
+    .prts-filter-main-row { display: flex; align-items: center; flex-wrap: wrap; width: 100%; }
+    .prts-filter-sync-row { display: flex; align-items: center; width: 100%; padding-left: 48px; margin-top: 2px; }
+    .prts-filter-sync-row:empty { display: none; }
     .prts-btn {
         background: none !important; background-color: transparent !important; border: none !important;
         box-shadow: none !important; cursor: pointer !important; display: inline-flex !important;
@@ -86,7 +89,7 @@
     .prts-account-cell .prts-acc-btn { width: 100% !important; }
     .prts-account-sync-meta { display: none; min-width: 0; padding-left: 2px; font-size: 11px; line-height: 1.35; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prts-account-sync-meta.is-visible { display: block; }
-    .prts-account-sync-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: 26px; padding: 3px 8px; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #2563eb; font-size: 12px; font-weight: 700; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .prts-account-sync-chip { display: inline-flex; align-items: center; max-width: min(100%, 360px); min-height: 26px; padding: 3px 8px; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #2563eb; font-size: 12px; font-weight: 700; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prts-account-rename { flex: 0 0 auto; border: 1px solid #cbd5e1; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; font-size: 12px; padding: 4px 6px; line-height: 1.2; }
     .prts-account-rename:hover { color: #2563eb; border-color: #93c5fd; background-color: rgba(147, 197, 253, 0.16); }
     .prts-panel-actions { display: flex; gap: 8px; margin-top: 8px; width: 100%; }
@@ -501,11 +504,18 @@
         --prts-shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
     }
     #prts-filter-bar {
-        gap: var(--prts-space-1) !important;
+        gap: 0 !important;
         padding: var(--prts-space-1) 0 !important;
         margin-top: var(--prts-space-2) !important;
         margin-bottom: var(--prts-space-3) !important;
         font-family: var(--prts-font-sans);
+    }
+    .prts-filter-main-row {
+        gap: var(--prts-space-1) !important;
+    }
+    .prts-filter-sync-row {
+        padding-left: 48px;
+        margin-top: 2px;
     }
     .prts-btn {
         gap: 6px !important;

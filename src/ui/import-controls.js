@@ -384,6 +384,22 @@
             searchRow.parentNode.insertBefore(controlBar, searchRow.nextElementSibling);
         }
 
+        let mainRow = document.getElementById('prts-filter-main-row');
+        if (!mainRow) {
+            mainRow = document.createElement('div');
+            mainRow.id = 'prts-filter-main-row';
+        }
+        mainRow.className = 'prts-filter-main-row';
+        controlBar.appendChild(mainRow);
+
+        let syncRow = document.getElementById('prts-filter-sync-row');
+        if (!syncRow) {
+            syncRow = document.createElement('div');
+            syncRow.id = 'prts-filter-sync-row';
+        }
+        syncRow.className = 'prts-filter-sync-row';
+        controlBar.appendChild(syncRow);
+
         const paths = {
             import: 'M11 6h3l-6 6-6-6h3V1h6v5zm-9 8v2h12v-2h-2v1H4v-1H2z',
             eyeOn: 'M8 3C3 3 0 8 0 8s3 5 8 5 8-5 8-5-3-5-8-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z M8 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
@@ -400,7 +416,7 @@
         // (1) 账号循环切换按钮
         const btnAccountText = getAccountLabel(activeAccountId);
         const btnAccount = createPrtsButton({ id: 'btn-account', text: btnAccountText, icon: 'account', ariaLabel: `当前账号 ${btnAccountText}，点击切换账号`, onClick: cycleAccount });
-        controlBar.appendChild(btnAccount);
+        mainRow.appendChild(btnAccount);
 
         const activeSklandSync = getAccountSklandSyncMeta(activeAccountId);
         let accountSyncChip = document.getElementById('prts-account-sync-chip');
@@ -412,7 +428,7 @@
             }
             accountSyncChip.textContent = formatSklandSyncSummary(activeSklandSync, { compact: true });
             accountSyncChip.title = formatSklandSyncSummary(activeSklandSync, { includeDetail: true });
-            controlBar.appendChild(accountSyncChip);
+            syncRow.appendChild(accountSyncChip);
         } else if (accountSyncChip) {
             accountSyncChip.remove();
         }
@@ -420,16 +436,16 @@
         // (2) 导入按钮
         const importText = ownedOpsSet.size > 0 ? `导入干员 (${ownedOpsSet.size})` : '导入干员';
         const btnImport = createPrtsButton({ id: 'btn-import', text: importText, icon: 'import', ariaLabel: importText, onClick: handleImport });
-        controlBar.appendChild(btnImport);
+        mainRow.appendChild(btnImport);
 
         const btnSklandImport = createPrtsButton({ id: 'btn-skland-import', text: '森空岛导入', icon: 'skland', onClick: handleOpenSklandImport });
-        controlBar.appendChild(btnSklandImport);
+        mainRow.appendChild(btnSklandImport);
 
         // (3) 模式切换
         const displayModeText = displayMode === 'GRAY' ? '置灰模式' : '隐藏模式';
         const displayModeIcon = displayMode === 'GRAY' ? 'eyeOn' : 'eyeOff';
         const btnSetting = createPrtsButton({ id: 'btn-setting', text: displayModeText, icon: displayModeIcon, pressed: displayMode === 'HIDE', ariaLabel: `当前为${displayModeText}，点击切换显示模式`, onClick: toggleDisplayMode });
-        controlBar.appendChild(btnSetting);
+        mainRow.appendChild(btnSetting);
 
         // (4) 分割线
         let divider = document.getElementById('prts-divider-el');
@@ -438,7 +454,7 @@
             divider.className = 'prts-divider';
             divider.id = 'prts-divider-el';
         }
-        controlBar.appendChild(divider);
+        mainRow.appendChild(divider);
 
         // (5) 完美阵容
         const btnPerfect = createPrtsButton({
@@ -449,7 +465,7 @@
             active: currentFilterMode === 'PERFECT',
             pressed: currentFilterMode === 'PERFECT'
         });
-        controlBar.appendChild(btnPerfect);
+        mainRow.appendChild(btnPerfect);
 
         // (6) 允许助战
         const btnSupport = createPrtsButton({
@@ -460,7 +476,7 @@
             active: currentFilterMode === 'SUPPORT',
             pressed: currentFilterMode === 'SUPPORT'
         });
-        controlBar.appendChild(btnSupport);
+        mainRow.appendChild(btnSupport);
 
         if (isNew && currentFilterMode !== 'NONE') {
             requestFilterUpdate();

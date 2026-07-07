@@ -971,7 +971,10 @@
     .prts-bili-link .bp4-icon { margin-right: 4px; font-size: 11px; }
 
     /* 3. 筛选栏与按钮 */
-    #prts-filter-bar { display: flex; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 8px; margin-bottom: 12px; padding-left: 2px; }
+    #prts-filter-bar { display: flex; align-items: flex-start; flex-direction: column; width: 100%; margin-top: 8px; margin-bottom: 12px; padding-left: 2px; }
+    .prts-filter-main-row { display: flex; align-items: center; flex-wrap: wrap; width: 100%; }
+    .prts-filter-sync-row { display: flex; align-items: center; width: 100%; padding-left: 48px; margin-top: 2px; }
+    .prts-filter-sync-row:empty { display: none; }
     .prts-btn {
         background: none !important; background-color: transparent !important; border: none !important;
         box-shadow: none !important; cursor: pointer !important; display: inline-flex !important;
@@ -1013,7 +1016,7 @@
     .prts-account-cell .prts-acc-btn { width: 100% !important; }
     .prts-account-sync-meta { display: none; min-width: 0; padding-left: 2px; font-size: 11px; line-height: 1.35; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prts-account-sync-meta.is-visible { display: block; }
-    .prts-account-sync-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: 26px; padding: 3px 8px; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #2563eb; font-size: 12px; font-weight: 700; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .prts-account-sync-chip { display: inline-flex; align-items: center; max-width: min(100%, 360px); min-height: 26px; padding: 3px 8px; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #2563eb; font-size: 12px; font-weight: 700; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prts-account-rename { flex: 0 0 auto; border: 1px solid #cbd5e1; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; font-size: 12px; padding: 4px 6px; line-height: 1.2; }
     .prts-account-rename:hover { color: #2563eb; border-color: #93c5fd; background-color: rgba(147, 197, 253, 0.16); }
     .prts-panel-actions { display: flex; gap: 8px; margin-top: 8px; width: 100%; }
@@ -1428,11 +1431,18 @@
         --prts-shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
     }
     #prts-filter-bar {
-        gap: var(--prts-space-1) !important;
+        gap: 0 !important;
         padding: var(--prts-space-1) 0 !important;
         margin-top: var(--prts-space-2) !important;
         margin-bottom: var(--prts-space-3) !important;
         font-family: var(--prts-font-sans);
+    }
+    .prts-filter-main-row {
+        gap: var(--prts-space-1) !important;
+    }
+    .prts-filter-sync-row {
+        padding-left: 48px;
+        margin-top: 2px;
     }
     .prts-btn {
         gap: 6px !important;
@@ -3337,6 +3347,22 @@
             searchRow.parentNode.insertBefore(controlBar, searchRow.nextElementSibling);
         }
 
+        let mainRow = document.getElementById('prts-filter-main-row');
+        if (!mainRow) {
+            mainRow = document.createElement('div');
+            mainRow.id = 'prts-filter-main-row';
+        }
+        mainRow.className = 'prts-filter-main-row';
+        controlBar.appendChild(mainRow);
+
+        let syncRow = document.getElementById('prts-filter-sync-row');
+        if (!syncRow) {
+            syncRow = document.createElement('div');
+            syncRow.id = 'prts-filter-sync-row';
+        }
+        syncRow.className = 'prts-filter-sync-row';
+        controlBar.appendChild(syncRow);
+
         const paths = {
             import: 'M11 6h3l-6 6-6-6h3V1h6v5zm-9 8v2h12v-2h-2v1H4v-1H2z',
             eyeOn: 'M8 3C3 3 0 8 0 8s3 5 8 5 8-5 8-5-3-5-8-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z M8 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
@@ -3353,7 +3379,7 @@
         // (1) 账号循环切换按钮
         const btnAccountText = getAccountLabel(activeAccountId);
         const btnAccount = createPrtsButton({ id: 'btn-account', text: btnAccountText, icon: 'account', ariaLabel: `当前账号 ${btnAccountText}，点击切换账号`, onClick: cycleAccount });
-        controlBar.appendChild(btnAccount);
+        mainRow.appendChild(btnAccount);
 
         const activeSklandSync = getAccountSklandSyncMeta(activeAccountId);
         let accountSyncChip = document.getElementById('prts-account-sync-chip');
@@ -3365,7 +3391,7 @@
             }
             accountSyncChip.textContent = formatSklandSyncSummary(activeSklandSync, { compact: true });
             accountSyncChip.title = formatSklandSyncSummary(activeSklandSync, { includeDetail: true });
-            controlBar.appendChild(accountSyncChip);
+            syncRow.appendChild(accountSyncChip);
         } else if (accountSyncChip) {
             accountSyncChip.remove();
         }
@@ -3373,16 +3399,16 @@
         // (2) 导入按钮
         const importText = ownedOpsSet.size > 0 ? `导入干员 (${ownedOpsSet.size})` : '导入干员';
         const btnImport = createPrtsButton({ id: 'btn-import', text: importText, icon: 'import', ariaLabel: importText, onClick: handleImport });
-        controlBar.appendChild(btnImport);
+        mainRow.appendChild(btnImport);
 
         const btnSklandImport = createPrtsButton({ id: 'btn-skland-import', text: '森空岛导入', icon: 'skland', onClick: handleOpenSklandImport });
-        controlBar.appendChild(btnSklandImport);
+        mainRow.appendChild(btnSklandImport);
 
         // (3) 模式切换
         const displayModeText = displayMode === 'GRAY' ? '置灰模式' : '隐藏模式';
         const displayModeIcon = displayMode === 'GRAY' ? 'eyeOn' : 'eyeOff';
         const btnSetting = createPrtsButton({ id: 'btn-setting', text: displayModeText, icon: displayModeIcon, pressed: displayMode === 'HIDE', ariaLabel: `当前为${displayModeText}，点击切换显示模式`, onClick: toggleDisplayMode });
-        controlBar.appendChild(btnSetting);
+        mainRow.appendChild(btnSetting);
 
         // (4) 分割线
         let divider = document.getElementById('prts-divider-el');
@@ -3391,7 +3417,7 @@
             divider.className = 'prts-divider';
             divider.id = 'prts-divider-el';
         }
-        controlBar.appendChild(divider);
+        mainRow.appendChild(divider);
 
         // (5) 完美阵容
         const btnPerfect = createPrtsButton({
@@ -3402,7 +3428,7 @@
             active: currentFilterMode === 'PERFECT',
             pressed: currentFilterMode === 'PERFECT'
         });
-        controlBar.appendChild(btnPerfect);
+        mainRow.appendChild(btnPerfect);
 
         // (6) 允许助战
         const btnSupport = createPrtsButton({
@@ -3413,7 +3439,7 @@
             active: currentFilterMode === 'SUPPORT',
             pressed: currentFilterMode === 'SUPPORT'
         });
-        controlBar.appendChild(btnSupport);
+        mainRow.appendChild(btnSupport);
 
         if (isNew && currentFilterMode !== 'NONE') {
             requestFilterUpdate();
