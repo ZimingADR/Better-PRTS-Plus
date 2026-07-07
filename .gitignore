@@ -8,3 +8,4 @@ tool/*
 !tool/publish-release.ps1
 !tool/operator-data.generated.json
 .idea
+graphify-out
