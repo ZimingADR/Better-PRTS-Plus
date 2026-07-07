@@ -113,19 +113,30 @@
             throw new Error('读取森空岛绑定角色失败，请稍后重试。');
         }
 
-        for (const item of data.data.list) {
+        const binding = selectSklandArknightsBinding(data.data.list);
+        if (binding) return binding;
+
+        throw new Error('森空岛账号未找到已绑定的明日方舟角色。');
+    }
+
+    function selectSklandArknightsBinding(list) {
+        if (!Array.isArray(list)) return null;
+
+        for (const item of list) {
             if (!isPlainRecord(item) || item.appCode !== 'arknights' || !Array.isArray(item.bindingList)) continue;
             const bindingList = item.bindingList.filter(isPlainRecord);
-            const first = bindingList[0];
-            const uid = stringValue(item.defaultUid ?? first?.uid);
-            const matched = bindingList.find(binding => stringValue(binding.uid) === uid) || first;
+            const defaultUid = stringValue(item.defaultUid);
+            const matched = defaultUid
+                ? bindingList.find(binding => stringValue(binding.uid) === defaultUid) || bindingList[0]
+                : bindingList.find(binding => stringValue(binding.uid));
+            const uid = defaultUid || stringValue(matched?.uid);
             const nickname = stringValue(matched?.nickName ?? matched?.nickname ?? uid);
             const channel = stringValue(matched?.channelName ?? matched?.channel ?? '官方');
             if (uid && nickname) {
                 return { uid, nickname, channelName: channel || '官方' };
             }
         }
-        throw new Error('森空岛账号未找到已绑定的明日方舟角色。');
+        return null;
     }
 
     async function getSklandGamePlayerInfo(credential, token, timestamp, uid) {

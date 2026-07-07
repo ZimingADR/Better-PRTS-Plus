@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better-PRTS-Plus
 // @namespace    https://github.com/ntgmc/Better-PRTS-Plus
-// @version      3.2.1
+// @version      3.2.2
 // @description  一款集成多账号无缝切换、智能作业筛选(支持干员组)、深度暗黑模式适配与干员头像可视化的 PRTS 全方位增强脚本。
 // @author       一只摆烂的42
 // @match        https://zoot.plus/*
@@ -482,19 +482,30 @@
             throw new Error('读取森空岛绑定角色失败，请稍后重试。');
         }
 
-        for (const item of data.data.list) {
+        const binding = selectSklandArknightsBinding(data.data.list);
+        if (binding) return binding;
+
+        throw new Error('森空岛账号未找到已绑定的明日方舟角色。');
+    }
+
+    function selectSklandArknightsBinding(list) {
+        if (!Array.isArray(list)) return null;
+
+        for (const item of list) {
             if (!isPlainRecord(item) || item.appCode !== 'arknights' || !Array.isArray(item.bindingList)) continue;
             const bindingList = item.bindingList.filter(isPlainRecord);
-            const first = bindingList[0];
-            const uid = stringValue(item.defaultUid ?? first?.uid);
-            const matched = bindingList.find(binding => stringValue(binding.uid) === uid) || first;
+            const defaultUid = stringValue(item.defaultUid);
+            const matched = defaultUid
+                ? bindingList.find(binding => stringValue(binding.uid) === defaultUid) || bindingList[0]
+                : bindingList.find(binding => stringValue(binding.uid));
+            const uid = defaultUid || stringValue(matched?.uid);
             const nickname = stringValue(matched?.nickName ?? matched?.nickname ?? uid);
             const channel = stringValue(matched?.channelName ?? matched?.channel ?? '官方');
             if (uid && nickname) {
                 return { uid, nickname, channelName: channel || '官方' };
             }
         }
-        throw new Error('森空岛账号未找到已绑定的明日方舟角色。');
+        return null;
     }
 
     async function getSklandGamePlayerInfo(credential, token, timestamp, uid) {
