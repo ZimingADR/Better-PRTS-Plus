@@ -1,25 +1,29 @@
 {
     "source":  "https://raw.githubusercontent.com/ZOOT-Plus/zoot-plus-frontend/refs/heads/dev/src/models/generated/operators.json",
     "sourceKind":  "url",
-    "generatedAtUtc":  "2026-07-19T03:38:56.4571575Z",
-    "previousCount":  418,
-    "newCount":  421,
-    "delta":  3,
-    "addedCount":  3,
+    "generatedAtUtc":  "2026-08-15T16:50:44.4637976Z",
+    "previousCount":  421,
+    "newCount":  425,
+    "delta":  4,
+    "addedCount":  4,
     "removedCount":  0,
     "renamedCount":  0,
     "added":  [
                   {
-                      "id":  "char_4229_aphris",
-                      "name":  "谬因"
+                      "id":  "char_1015_aglna2",
+                      "name":  "予愿安洁莉娜"
                   },
                   {
-                      "id":  "char_4230_mcnist",
-                      "name":  "机械师"
+                      "id":  "char_4235_thumpy",
+                      "name":  "珊比"
                   },
                   {
-                      "id":  "char_4234_pedro",
-                      "name":  "佩德洛"
+                      "id":  "char_4236_tmslot",
+                      "name":  "时隙"
+                  },
+                  {
+                      "id":  "char_4237_jcinta",
+                      "name":  "嘉辛塔"
                   }
               ],
     "removed":  [

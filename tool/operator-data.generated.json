@@ -36,6 +36,10 @@
         "name":  "耀骑士临光"
     },
     {
+        "id":  "char_1015_aglna2",
+        "name":  "予愿安洁莉娜"
+    },
+    {
         "id":  "char_1016_agoat2",
         "name":  "纯烬艾雅法拉"
     },
@@ -1490,6 +1494,18 @@
     {
         "id":  "char_4234_pedro",
         "name":  "佩德洛"
+    },
+    {
+        "id":  "char_4235_thumpy",
+        "name":  "珊比"
+    },
+    {
+        "id":  "char_4236_tmslot",
+        "name":  "时隙"
+    },
+    {
+        "id":  "char_4237_jcinta",
+        "name":  "嘉辛塔"
     },
     {
         "id":  "char_423_blemsh",
